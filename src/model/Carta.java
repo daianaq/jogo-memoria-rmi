@@ -1,15 +1,21 @@
 package model;
 
-public class Carta {
+import java.io.Serializable;
+
+public class Carta implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final int posicao;
     private final int valor;
+
     private boolean revelada;
     private boolean pareada;
 
     public Carta(int posicao, int valor) {
         this.posicao = posicao;
         this.valor = valor;
+
         this.revelada = false;
         this.pareada = false;
     }
