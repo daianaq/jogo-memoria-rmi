@@ -22,10 +22,10 @@ public class JogoMemoriaImpl extends UnicastRemoteObject
     }
 
     @Override
-    public synchronized int entrarPartida()
+    public synchronized int entrarPartida(String nome)
             throws RemoteException, OperacaoRejeitadaException {
 
-        return partida.adicionarJogador();
+        return partida.adicionarJogador(nome);
     }
 
     @Override
@@ -43,6 +43,7 @@ public class JogoMemoriaImpl extends UnicastRemoteObject
         return new EstadoPartida(
                 partida.getCartas(),
                 partida.getPontuacoes(),
+                partida.getNomesJogadores(),
                 partida.getSituacao(),
                 partida.getJogadorDaVez(),
                 partida.getTempoRestanteSegundos()
