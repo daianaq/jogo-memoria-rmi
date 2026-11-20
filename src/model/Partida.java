@@ -68,7 +68,7 @@ public class Partida {
         }
     }
 
-    public synchronized int adicionarJogador()
+    public synchronized int adicionarJogador(String nome)
             throws OperacaoRejeitadaException {
 
         if (jogadores.size() >= TOTAL_JOGADORES) {
@@ -77,9 +77,15 @@ public class Partida {
             );
         }
 
+        if (nome == null || nome.trim().isEmpty()) {
+            throw new OperacaoRejeitadaException(
+                    "O nome do jogador não pode estar vazio."
+            );
+        }
+
         int id = jogadores.size();
 
-        Jogador jogador = new Jogador(id);
+        Jogador jogador = new Jogador(id, nome.trim());
         jogadores.add(jogador);
 
         if (jogadores.size() == TOTAL_JOGADORES) {
@@ -254,6 +260,17 @@ public class Partida {
 
             inicioTurnoNanos = System.nanoTime();
         }
+    }
+    
+    public synchronized String[] getNomesJogadores() {
+
+        String[] nomes = new String[jogadores.size()];
+
+        for (int i = 0; i < jogadores.size(); i++) {
+            nomes[i] = jogadores.get(i).getNome();
+        }
+
+        return nomes;
     }
 
     public synchronized SituacaoPartida getSituacao() {
