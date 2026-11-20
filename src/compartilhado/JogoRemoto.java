@@ -1,12 +1,11 @@
 package compartilhado;
 
 import java.rmi.Remote;
-
 import java.rmi.RemoteException;
 
 public interface JogoRemoto extends Remote {
 
-    int entrarPartida()
+    int entrarPartida(String nome)
             throws RemoteException, OperacaoRejeitadaException;
 
     ResultadoJogo virarCarta(int idJogador, int posicao)
@@ -15,3 +14,4 @@ public interface JogoRemoto extends Remote {
     EstadoPartida obterEstado()
             throws RemoteException;
 }
+
