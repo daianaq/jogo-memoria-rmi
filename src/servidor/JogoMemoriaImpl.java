@@ -18,35 +18,25 @@ public class JogoMemoriaImpl extends UnicastRemoteObject
 
     public JogoMemoriaImpl() throws RemoteException {
         super();
-        this.partida = new Partida();
+        partida = new Partida();
     }
 
     @Override
-    public synchronized int entrarPartida(String nome)
+    public int entrarPartida(String nome)
             throws RemoteException, OperacaoRejeitadaException {
 
         return partida.adicionarJogador(nome);
     }
 
     @Override
-    public synchronized ResultadoJogo virarCarta(
-            int idJogador, int posicao)
+    public ResultadoJogo virarCarta(int idJogador, int posicao)
             throws RemoteException, OperacaoRejeitadaException {
 
         return partida.virarCarta(idJogador, posicao);
     }
 
     @Override
-    public synchronized EstadoPartida obterEstado()
-            throws RemoteException {
-
-        return new EstadoPartida(
-                partida.getCartas(),
-                partida.getPontuacoes(),
-                partida.getNomesJogadores(),
-                partida.getSituacao(),
-                partida.getJogadorDaVez(),
-                partida.getTempoRestanteSegundos()
-        );
+    public EstadoPartida obterEstado() throws RemoteException {
+        return partida.obterEstado();
     }
 }

@@ -1,5 +1,6 @@
 package model;
 
+import compartilhado.EstadoPartida;
 import compartilhado.OperacaoRejeitadaException;
 import compartilhado.ResultadoJogo;
 import compartilhado.SituacaoPartida;
@@ -8,14 +9,18 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 public class Partida {
 
     public static final int TOTAL_PARES = 8;
     public static final int TOTAL_JOGADORES = 2;
 
-    private static final int TEMPO_LIMITE_TURNO_SEGUNDOS = 20;
-    private static final long TEMPO_EXIBICAO_PAR_INCORRETO_MILLIS = 2000;
+    private static final long TEMPO_TURNO_NANOS =
+            TimeUnit.SECONDS.toNanos(20);
+
+    private static final long TEMPO_ERRO_NANOS =
+            TimeUnit.SECONDS.toNanos(2);
 
     private final List<Carta> cartas;
     private final List<Jogador> jogadores;
@@ -29,8 +34,11 @@ public class Partida {
     private long inicioTurnoNanos;
     private long inicioExibicaoParIncorretoNanos;
 
-    public Partida() {
+    private boolean bloqueada;
+    private int vencedor;
+    private boolean empate;
 
+    public Partida() {
         cartas = new ArrayList<>();
         jogadores = new ArrayList<>();
 
@@ -40,14 +48,14 @@ public class Partida {
         primeiraCartaDoTurno = -1;
         segundaCartaDoParIncorreto = -1;
 
-        inicioTurnoNanos = 0;
-        inicioExibicaoParIncorretoNanos = 0;
+        bloqueada = false;
+        vencedor = -1;
+        empate = false;
 
         criarTabuleiro();
     }
 
     private void criarTabuleiro() {
-
         List<Integer> valores = new ArrayList<>();
 
         for (int valor = 0; valor < TOTAL_PARES; valor++) {
@@ -58,13 +66,7 @@ public class Partida {
         Collections.shuffle(valores);
 
         for (int posicao = 0; posicao < valores.size(); posicao++) {
-
-            Carta carta = new Carta(
-                    posicao,
-                    valores.get(posicao)
-            );
-
-            cartas.add(carta);
+            cartas.add(new Carta(posicao, valores.get(posicao)));
         }
     }
 
@@ -77,16 +79,14 @@ public class Partida {
             );
         }
 
-        if (nome == null || nome.trim().isEmpty()) {
+        if (nome == null || nome.isBlank()) {
             throw new OperacaoRejeitadaException(
                     "O nome do jogador não pode estar vazio."
             );
         }
 
         int id = jogadores.size();
-
-        Jogador jogador = new Jogador(id, nome.trim());
-        jogadores.add(jogador);
+        jogadores.add(new Jogador(id, nome.strip()));
 
         if (jogadores.size() == TOTAL_JOGADORES) {
             iniciar();
@@ -96,21 +96,21 @@ public class Partida {
     }
 
     private void iniciar() {
-
         jogadorDaVez = ThreadLocalRandom.current()
                 .nextInt(TOTAL_JOGADORES);
 
         situacao = SituacaoPartida.EM_ANDAMENTO;
 
-        primeiraCartaDoTurno = -1;
-        segundaCartaDoParIncorreto = -1;
+        limparSelecao();
+        bloqueada = false;
 
         inicioTurnoNanos = System.nanoTime();
     }
 
     public synchronized ResultadoJogo virarCarta(
-            int idJogador, int posicao)
-            throws OperacaoRejeitadaException {
+            int idJogador,
+            int posicao
+    ) throws OperacaoRejeitadaException {
 
         if (idJogador < 0 || idJogador >= jogadores.size()) {
             throw new OperacaoRejeitadaException(
@@ -118,7 +118,8 @@ public class Partida {
             );
         }
 
-        atualizarTempo();
+        long agora = System.nanoTime();
+        atualizarTempo(agora);
 
         if (situacao != SituacaoPartida.EM_ANDAMENTO) {
             throw new OperacaoRejeitadaException(
@@ -126,7 +127,7 @@ public class Partida {
             );
         }
 
-        if (inicioExibicaoParIncorretoNanos != 0) {
+        if (bloqueada) {
             throw new OperacaoRejeitadaException(
                     "Aguarde a ocultação das cartas."
             );
@@ -144,18 +145,17 @@ public class Partida {
             );
         }
 
-        Carta cartaSelecionada = cartas.get(posicao);
+        Carta selecionada = cartas.get(posicao);
 
-        if (!cartaSelecionada.estaDisponivel()) {
+        if (!selecionada.estaDisponivel()) {
             throw new OperacaoRejeitadaException(
                     "Esta carta não está disponível."
             );
         }
 
-        cartaSelecionada.revelar();
+        selecionada.revelar();
 
         if (primeiraCartaDoTurno == -1) {
-
             primeiraCartaDoTurno = posicao;
 
             return new ResultadoJogo(
@@ -163,29 +163,17 @@ public class Partida {
             );
         }
 
-        Carta primeiraCarta = cartas.get(primeiraCartaDoTurno);
+        Carta primeira = cartas.get(primeiraCartaDoTurno);
 
-        if (primeiraCarta.getValor() == cartaSelecionada.getValor()) {
-
-            primeiraCarta.marcarComoPareada();
-            cartaSelecionada.marcarComoPareada();
+        if (primeira.getValor() == selecionada.getValor()) {
+            primeira.marcarComoPareada();
+            selecionada.marcarComoPareada();
 
             jogadores.get(idJogador).adicionarPonto();
+            limparSelecao();
 
-            primeiraCartaDoTurno = -1;
-
-            boolean todasPareadas = true;
-
-            for (Carta carta : cartas) {
-                if (!carta.isPareada()) {
-                    todasPareadas = false;
-                    break;
-                }
-            }
-
-            if (todasPareadas) {
-
-                situacao = SituacaoPartida.ENCERRADA;
+            if (todosOsParesEncontrados()) {
+                encerrar();
 
                 return new ResultadoJogo(
                         ResultadoJogo.TipoResultado.PARTIDA_ENCERRADA
@@ -200,7 +188,7 @@ public class Partida {
         }
 
         segundaCartaDoParIncorreto = posicao;
-
+        bloqueada = true;
         inicioExibicaoParIncorretoNanos = System.nanoTime();
 
         return new ResultadoJogo(
@@ -208,172 +196,115 @@ public class Partida {
         );
     }
 
-    private void atualizarTempo() {
-
+    private void atualizarTempo(long agora) {
         if (situacao != SituacaoPartida.EM_ANDAMENTO) {
             return;
         }
 
+        if (bloqueada) {
+            long decorrido = agora - inicioExibicaoParIncorretoNanos;
+
+            if (decorrido >= TEMPO_ERRO_NANOS) {
+                ocultarSelecionadas();
+                limparSelecao();
+
+                bloqueada = false;
+                passarVez(agora);
+            }
+
+            return;
+        }
+
+        long decorrido = agora - inicioTurnoNanos;
+
+        if (decorrido >= TEMPO_TURNO_NANOS) {
+            ocultarSelecionadas();
+            limparSelecao();
+            passarVez(agora);
+        }
+    }
+
+    private void ocultarSelecionadas() {
+        if (primeiraCartaDoTurno != -1) {
+            cartas.get(primeiraCartaDoTurno).ocultar();
+        }
+
+        if (segundaCartaDoParIncorreto != -1) {
+            cartas.get(segundaCartaDoParIncorreto).ocultar();
+        }
+    }
+
+    private void limparSelecao() {
+        primeiraCartaDoTurno = -1;
+        segundaCartaDoParIncorreto = -1;
+    }
+
+    private void passarVez(long agora) {
+        jogadorDaVez = (jogadorDaVez + 1) % TOTAL_JOGADORES;
+        inicioTurnoNanos = agora;
+    }
+
+    private boolean todosOsParesEncontrados() {
+        for (Carta carta : cartas) {
+            if (!carta.isPareada()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void encerrar() {
+        situacao = SituacaoPartida.ENCERRADA;
+        jogadorDaVez = -1;
+        bloqueada = false;
+
+        int pontos0 = jogadores.get(0).getPontuacao();
+        int pontos1 = jogadores.get(1).getPontuacao();
+
+        empate = pontos0 == pontos1;
+        vencedor = empate ? -1 : (pontos0 > pontos1 ? 0 : 1);
+    }
+
+    private long calcularTempoRestante(long agora) {
+        if (situacao != SituacaoPartida.EM_ANDAMENTO || bloqueada) {
+            return 0;
+        }
+
+        long restante = TEMPO_TURNO_NANOS
+                - (agora - inicioTurnoNanos);
+
+        if (restante <= 0) {
+            return 0;
+        }
+
+        return (restante + 999_999_999L) / 1_000_000_000L;
+    }
+
+    public synchronized EstadoPartida obterEstado() {
         long agora = System.nanoTime();
+        atualizarTempo(agora);
 
-        if (inicioExibicaoParIncorretoNanos != 0) {
+        int[] pontuacoes = new int[TOTAL_JOGADORES];
+        String[] nomes = {"Jogador 1", "Jogador 2"};
 
-            long tempoDecorrido = agora
-                    - inicioExibicaoParIncorretoNanos;
+        for (Jogador jogador : jogadores) {
+            int id = jogador.getId();
 
-            long tempoLimite = TEMPO_EXIBICAO_PAR_INCORRETO_MILLIS
-                    * 1_000_000L;
-
-            if (tempoDecorrido >= tempoLimite) {
-
-                cartas.get(primeiraCartaDoTurno).ocultar();
-                cartas.get(segundaCartaDoParIncorreto).ocultar();
-
-                primeiraCartaDoTurno = -1;
-                segundaCartaDoParIncorreto = -1;
-
-                inicioExibicaoParIncorretoNanos = 0;
-                
-                jogadorDaVez = (jogadorDaVez + 1) % TOTAL_JOGADORES;
-
-               
-                inicioTurnoNanos = System.nanoTime();
-            }
-
-            return;
+            pontuacoes[id] = jogador.getPontuacao();
+            nomes[id] = jogador.getNome();
         }
 
-        long tempoDecorrido = agora - inicioTurnoNanos;
-
-        long tempoLimite = TEMPO_LIMITE_TURNO_SEGUNDOS
-                * 1_000_000_000L;
-
-        if (tempoDecorrido >= tempoLimite) {
-
-            if (primeiraCartaDoTurno != -1) {
-                cartas.get(primeiraCartaDoTurno).ocultar();
-            }
-
-            primeiraCartaDoTurno = -1;
-
-            jogadorDaVez = (jogadorDaVez + 1) % TOTAL_JOGADORES;
-
-            inicioTurnoNanos = System.nanoTime();
-        }
-    }
-    
-    public synchronized String[] getNomesJogadores() {
-
-        String[] nomes = new String[jogadores.size()];
-
-        for (int i = 0; i < jogadores.size(); i++) {
-            nomes[i] = jogadores.get(i).getNome();
-        }
-
-        return nomes;
-    }
-
-    public synchronized SituacaoPartida getSituacao() {
-
-        atualizarTempo();
-
-        return situacao;
-    }
-
-    public synchronized int getJogadorDaVez() {
-
-        atualizarTempo();
-
-        return jogadorDaVez;
-    }
-
-    public synchronized int getQuantidadeJogadores() {
-
-        return jogadores.size();
-    }
-
-    public synchronized List<Carta> getCartas() {
-
-        atualizarTempo();
-
-        return Collections.unmodifiableList(
-                new ArrayList<>(cartas)
+        return new EstadoPartida(
+                cartas,
+                pontuacoes,
+                nomes,
+                situacao,
+                jogadorDaVez,
+                calcularTempoRestante(agora),
+                bloqueada,
+                vencedor,
+                empate
         );
-    }
-
-    public synchronized int[] getPontuacoes() {
-
-        atualizarTempo();
-
-        int[] pontuacoes = new int[jogadores.size()];
-
-        for (int i = 0; i < jogadores.size(); i++) {
-            pontuacoes[i] = jogadores.get(i).getPontuacao();
-        }
-
-        return pontuacoes;
-    }
-
-    public synchronized long getTempoRestanteSegundos() {
-
-        atualizarTempo();
-
-        if (situacao != SituacaoPartida.EM_ANDAMENTO) {
-            return 0;
-        }
-
-        if (inicioExibicaoParIncorretoNanos != 0) {
-            return TEMPO_LIMITE_TURNO_SEGUNDOS;
-        }
-
-        long tempoLimite = TEMPO_LIMITE_TURNO_SEGUNDOS
-                * 1_000_000_000L;
-
-        long tempoDecorrido = System.nanoTime() - inicioTurnoNanos;
-
-        long tempoRestante = tempoLimite - tempoDecorrido;
-
-        if (tempoRestante <= 0) {
-            return 0;
-        }
-
-        return (tempoRestante + 999_999_999L)
-                / 1_000_000_000L;
-    }
-
-    
-    public synchronized int getVencedor() {
-
-        atualizarTempo();
-
-        if (situacao != SituacaoPartida.ENCERRADA) {
-            return -1;
-        }
-
-        int pontuacaoJogador0 = jogadores.get(0).getPontuacao();
-        int pontuacaoJogador1 = jogadores.get(1).getPontuacao();
-
-        if (pontuacaoJogador0 > pontuacaoJogador1) {
-            return 0;
-        }
-
-        if (pontuacaoJogador1 > pontuacaoJogador0) {
-            return 1;
-        }
-
-        return -1;
-    }
-
-  
-    public synchronized boolean isEmpate() {
-
-        atualizarTempo();
-
-        if (situacao != SituacaoPartida.ENCERRADA) {
-            return false;
-        }
-
-        return jogadores.get(0).getPontuacao()
-                == jogadores.get(1).getPontuacao();
     }
 }

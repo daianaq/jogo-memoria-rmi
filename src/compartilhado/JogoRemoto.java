@@ -14,4 +14,3 @@ public interface JogoRemoto extends Remote {
     EstadoPartida obterEstado()
             throws RemoteException;
 }
-
